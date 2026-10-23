@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SG Carpark Availability</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    html, body, #map { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
+    .panel {
+      position: absolute; bottom: 20px; left: 10px; z-index: 1000;
+      background: white; padding: 10px 14px; border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,.25); font-size: 13px; line-height: 1.6;
+    }
+    .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="panel">
+    <b>Car park availability</b><br>
+    <span class="dot" style="background:green"></span>More than 30% free<br>
+    <span class="dot" style="background:orange"></span>10–30% free<br>
+    <span class="dot" style="background:red"></span>Under 10% free<br>
+    <small>Heatmap: red = harder to find parking</small><br>
+    <small id="status">Loading…</small>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+  <script>
+    const map = L.map("map").setView([1.3521, 103.8198], 12);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "&copy; OpenStreetMap contributors"
+    }).addTo(map);
+
+    // Two layers we refill on every refresh
+    const heat = L.heatLayer([], { radius: 25, blur: 20, maxZoom: 15 }).addTo(map);
+    const markers = L.layerGroup();
+    L.control.layers(null, { "Heatmap (how full)": heat, "Car parks": markers }).addTo(map);
+
+    function colour(pctFree) {
+      if (pctFree > 0.3) return "green";
+      if (pctFree > 0.1) return "orange";
+      return "red";
+    }
+
+    async function loadData() {
+      try {
+        const res = await fetch("/api/availability");
+        const data = await res.json();
+
+        // Heatmap: weight = how full the car park is (0 = empty, 1 = full)
+        heat.setLatLngs(data.map(cp =>
+          [cp.lat, cp.lng, 1 - cp.lots_available / cp.total_lots]));
+
+        // Markers: one coloured circle per car park
+        markers.clearLayers();
+        data.forEach(cp => {
+          const pct = cp.lots_available / cp.total_lots;
+          L.circleMarker([cp.lat, cp.lng], {
+            radius: 6, color: colour(pct), fillOpacity: 0.8
+          }).bindPopup(`<b>${cp.address}</b><br>
+                        ${cp.lots_available} / ${cp.total_lots} lots free<br>
+                        <small>Updated ${cp.update_datetime}</small>`)
+            .addTo(markers);
+        });
+
+        document.getElementById("status").textContent =
+          `${data.length} car parks · refreshed ${new Date().toLocaleTimeString()}`;
+      } catch (e) {
+        document.getElementById("status").textContent = "Could not load data";
+      }
+    }
+
+    loadData();
+    setInterval(loadData, 60000);  // refresh every minute
+  </script>
+</body>
+</html>
