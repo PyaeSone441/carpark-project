@@ -1,15 +1,19 @@
-# STEP 2: Load HDB car park locations into the database (run once, refresh monthly)
-# Pulls the "HDB Carpark Information" dataset straight from the data.gov.sg API,
-# converts SVY21 coordinates to lat/lng, and saves it as the `carparks` table.
-import sqlite3
+# STEP 2: Load HDB car park locations into Postgres (run once, then monthly).
+# Pulls the "HDB Carpark Information" dataset from data.gov.sg,
+# converts SVY21 coordinates to lat/lng, and upserts into the `carparks` table.
+import os
 import time
 
-import pandas as pd
+import psycopg
 import requests
 from pyproj import Transformer
 
 DATASET_ID = "d_23f946fa557947f93a8043bbef41dd09"
 URL = "https://data.gov.sg/api/action/datastore_search"
+
+COLUMNS = ["car_park_no", "address", "lat", "lng", "car_park_type",
+           "type_of_parking_system", "short_term_parking", "free_parking",
+           "night_parking", "car_park_decks", "gantry_height", "car_park_basement"]
 
 
 def fetch_carpark_info():
@@ -24,21 +28,34 @@ def fetch_carpark_info():
         if offset >= result["total"]:
             break
         time.sleep(1)  # be polite to the API
-    return pd.DataFrame(records)
+    return records
 
 
-df = fetch_carpark_info()
-df = df.drop(columns=["_id"], errors="ignore")
+def to_rows(records):
+    # SVY21 (Singapore's local coordinates) -> lat/lng for the map
+    to_latlng = Transformer.from_crs("EPSG:3414", "EPSG:4326", always_xy=True)
+    rows = []
+    for rec in records:
+        try:
+            lng, lat = to_latlng.transform(float(rec["x_coord"]), float(rec["y_coord"]))
+        except (KeyError, ValueError, TypeError):
+            print(f"Skipping {rec.get('car_park_no')}: bad coordinates")
+            continue
+        rec = {**rec, "lat": lat, "lng": lng}
+        rows.append(tuple(None if rec.get(c) is None else
+                          (rec[c] if c in ("lat", "lng") else str(rec[c])) for c in COLUMNS))
+    return rows
 
-# Convert SVY21 (Singapore's local coordinates) to lat/lng for the map
-to_latlng = Transformer.from_crs("EPSG:3414", "EPSG:4326", always_xy=True)
-lng, lat = to_latlng.transform(df["x_coord"].astype(float).values,
-                               df["y_coord"].astype(float).values)
-df["lat"], df["lng"] = lat, lng
 
-conn = sqlite3.connect("carpark.db")
-df.to_sql("carparks", conn, if_exists="replace", index=False)
-conn.close()
-
-print(f"Loaded {len(df)} car parks")
-print(df[["car_park_no", "address", "lat", "lng"]].head(3))  # lat should be ~1.3, lng ~103.8
+if __name__ == "__main__":
+    rows = to_rows(fetch_carpark_info())
+    cols = ", ".join(COLUMNS)
+    placeholders = ", ".join(["%s"] * len(COLUMNS))
+    updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in COLUMNS[1:])
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        with conn.cursor() as cur:
+            cur.executemany(
+                f"INSERT INTO carparks ({cols}) VALUES ({placeholders}) "
+                f"ON CONFLICT (car_park_no) DO UPDATE SET {updates}", rows)
+    print(f"Loaded {len(rows)} car parks")
+    print(rows[:2])  # lat should be ~1.3, lng ~103.8
