@@ -1,0 +1,24 @@
+name: Set up tables and load car park locations
+
+on:
+  workflow_dispatch:          # run this once by hand after creating the database
+  schedule:
+    - cron: "0 19 1 * *"      # then refresh monthly (2nd of each month, 3am SGT)
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python db.py
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - run: python load_carparks.py
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
