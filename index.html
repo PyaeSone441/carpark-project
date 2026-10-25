@@ -6,75 +6,488 @@
   <title>SG Carpark Availability</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
-    html, body, #map { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
-    .panel {
-      position: absolute; bottom: 20px; left: 10px; z-index: 1000;
-      background: white; padding: 10px 14px; border-radius: 8px;
-      box-shadow: 0 2px 8px rgba(0,0,0,.25); font-size: 13px; line-height: 1.6;
+    :root {
+      --bg:       #0d0f12;
+      --panel:    #111317;
+      --card:     #191b20;
+      --card-hi:  #20232a;
+      --line:     #2a2d34;
+      --text:     #f2f3f5;
+      --muted:    #9097a3;
+
+      --good: #34d399;   /* under 70% full */
+      --mid:  #fbbf24;   /* 70–90% full */
+      --low:  #f87171;   /* over 90% full */
+      --none: #6b7280;   /* no trustworthy data */
+      --you:  #60a5fa;   /* your location */
     }
-    .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+      display: flex; overflow: hidden;
+    }
+
+    /* ---------- Side panel ---------- */
+    .panel {
+      width: 400px; flex-shrink: 0; height: 100%;
+      background: var(--panel); border-right: 1px solid var(--line);
+      display: flex; flex-direction: column;
+    }
+    .panel-head { padding: 20px 20px 12px; }
+    h1 { font-size: 18px; margin: 0 0 14px; letter-spacing: -.01em; }
+
+    .search { position: relative; }
+    .search input {
+      width: 100%; padding: 12px 14px 12px 40px;
+      background: var(--card); color: var(--text);
+      border: 1px solid var(--line); border-radius: 12px;
+      font: inherit; font-size: 14px; outline: none;
+    }
+    .search input:focus { border-color: var(--you); }
+    .search svg { position: absolute; left: 13px; top: 13px; color: var(--muted); }
+
+    .suggestions {
+      position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 2000;
+      background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+      overflow: hidden; display: none; box-shadow: 0 10px 30px rgba(0,0,0,.5);
+    }
+    .suggestions.open { display: block; }
+    .suggestion {
+      display: block; width: 100%; text-align: left; padding: 10px 14px;
+      background: none; border: none; color: var(--text); font: inherit; cursor: pointer;
+      border-bottom: 1px solid var(--line);
+    }
+    .suggestion:last-child { border-bottom: none; }
+    .suggestion:hover, .suggestion.active { background: var(--card-hi); }
+    .suggestion .s-name { font-size: 14px; font-weight: 600; }
+    .suggestion .s-addr { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .suggestion.empty { color: var(--muted); cursor: default; font-size: 13px; }
+
+    .locate {
+      margin-top: 10px; display: inline-flex; align-items: center; gap: 6px;
+      background: none; border: none; color: var(--you); font: inherit; font-size: 13px;
+      cursor: pointer; padding: 4px 0;
+    }
+    .locate:hover { text-decoration: underline; }
+
+    .context { padding: 0 20px 10px; font-size: 13px; color: var(--muted); }
+    .context b { color: var(--text); font-weight: 600; }
+
+    .list { flex: 1; overflow-y: auto; padding: 4px 16px 16px; }
+    .message { color: var(--muted); font-size: 14px; padding: 24px 6px; line-height: 1.5; }
+
+    /* ---------- Car park card ---------- */
+    .card {
+      position: relative; overflow: hidden;
+      background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+      margin-bottom: 12px; cursor: pointer; transition: background .15s, border-color .15s;
+    }
+    .card:hover, .card:focus-visible { background: var(--card-hi); border-color: #3a3e47; outline: none; }
+    .card-top { display: flex; justify-content: space-between; gap: 12px; padding: 16px 18px 14px; }
+    .card-name { font-size: 15px; font-weight: 700; line-height: 1.3; }
+    .card-meta {
+      margin-top: 8px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+      font-size: 13px; color: var(--muted);
+    }
+    .badge {
+      background: #2a2d34; color: #c9ced6; font-size: 11px; font-weight: 600;
+      padding: 2px 7px; border-radius: 6px; letter-spacing: .02em;
+    }
+    .pct { font-weight: 600; }
+    .lots { text-align: right; position: relative; flex-shrink: 0; }
+    .lots-num { font-size: 36px; font-weight: 800; line-height: 1; letter-spacing: -.02em; }
+    .lots-label { font-size: 10px; color: var(--muted); letter-spacing: .12em; margin-top: 4px; }
+    .lots-dot {
+      position: absolute; top: -6px; right: -8px; width: 7px; height: 7px; border-radius: 50%;
+    }
+    .card-bottom {
+      display: flex; justify-content: space-between; align-items: center;
+      border-top: 1px solid var(--line); margin: 0 18px; padding: 11px 0 15px;
+      font-size: 12px; color: var(--muted);
+    }
+    .card-bottom b { color: var(--text); font-weight: 600; }
+    .chevron { color: var(--muted); font-size: 16px; }
+    .bar { position: absolute; left: 0; bottom: 0; height: 4px; border-radius: 0 2px 2px 0; }
+
+    /* Colour helpers */
+    .c-good { color: var(--good); }  .bg-good { background: var(--good); }
+    .c-mid  { color: var(--mid); }   .bg-mid  { background: var(--mid); }
+    .c-low  { color: var(--low); }   .bg-low  { background: var(--low); }
+    .bg-none { background: var(--none); }
+
+    .footer { padding: 10px 20px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+
+    /* ---------- Map ---------- */
+    #map { flex: 1; height: 100%; background: var(--bg); }
+    .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--card); color: var(--text); }
+    .leaflet-popup-content { font-family: inherit; font-size: 13px; line-height: 1.5; }
+    .leaflet-container a.leaflet-popup-close-button { color: var(--muted); }
+
+    .cp-dot {
+      width: 14px; height: 14px; border-radius: 50%;
+      border: 2px solid #0d0f12; box-shadow: 0 0 0 1px rgba(255,255,255,.35);
+    }
+    .cp-dot.nearby { width: 18px; height: 18px; box-shadow: 0 0 0 3px rgba(255,255,255,.9); }
+    .cluster {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      border-radius: 50%; color: #0d0f12; text-align: center; line-height: 1.05;
+      border: 3px solid rgba(13,15,18,.6); box-shadow: 0 1px 6px rgba(0,0,0,.6);
+    }
+    .cluster .c-pct { font-weight: 800; }
+    .cluster .c-count { font-size: 10px; font-weight: 600; opacity: .8; }
+    .cluster.bg-none { color: white; }
+    .you-dot {
+      width: 16px; height: 16px; border-radius: 50%; background: var(--you);
+      border: 3px solid white; box-shadow: 0 0 0 6px rgba(96,165,250,.3);
+    }
+
+    .legend {
+      position: absolute; right: 12px; bottom: 26px; z-index: 1000;
+      background: rgba(17,19,23,.92); border: 1px solid var(--line); border-radius: 10px;
+      padding: 8px 12px; font-size: 12px; color: var(--muted); line-height: 1.8;
+    }
+    .legend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+
+    /* ---------- Phones: map on top, list below ---------- */
+    @media (max-width: 760px) {
+      body { flex-direction: column-reverse; }
+      .panel { width: 100%; height: 58%; border-right: none; border-top: 1px solid var(--line); }
+      #map { height: 42%; flex: none; }
+      .legend { display: none; }
+    }
   </style>
 </head>
 <body>
+  <aside class="panel">
+    <div class="panel-head">
+      <h1>Find parking near you</h1>
+      <div class="search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+             stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="search" type="search" autocomplete="off"
+               placeholder="Search an area or postal code" aria-label="Search an area or postal code">
+        <div id="suggestions" class="suggestions" role="listbox"></div>
+      </div>
+      <button id="locate" class="locate">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+             stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>
+          <circle cx="12" cy="12" r="8"/></svg>
+        Use my location
+      </button>
+    </div>
+    <div id="context" class="context">Finding your location…</div>
+    <div id="list" class="list"></div>
+    <div id="footer" class="footer">Live HDB data from data.gov.sg</div>
+  </aside>
+
   <div id="map"></div>
-  <div class="panel">
-    <b>Car park availability</b><br>
-    <span class="dot" style="background:green"></span>More than 30% free<br>
-    <span class="dot" style="background:orange"></span>10–30% free<br>
-    <span class="dot" style="background:red"></span>Under 10% free<br>
-    <small>Heatmap: red = harder to find parking</small><br>
-    <small id="status">Loading…</small>
+  <div class="legend">
+    <span class="dot bg-good"></span>Under 70% full<br>
+    <span class="dot bg-mid"></span>70–90% full<br>
+    <span class="dot bg-low"></span>Over 90% full<br>
+    <span class="dot bg-none"></span>No recent data
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
   <script>
-    const map = L.map("map").setView([1.3521, 103.8198], 12);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "&copy; OpenStreetMap contributors"
+    const NEARBY_COUNT = 5;
+
+    // ---------- Map ----------
+    const map = L.map("map", { zoomControl: false }).setView([1.3521, 103.8198], 12);
+    L.control.zoom({ position: "topright" }).addTo(map);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      subdomains: "abcd", maxZoom: 20,
     }).addTo(map);
 
-    // Two layers we refill on every refresh
-    const heat = L.heatLayer([], { radius: 25, blur: 20, maxZoom: 15 }).addTo(map);
-    const markers = L.layerGroup();
-    L.control.layers(null, { "Heatmap (how full)": heat, "Car parks": markers }).addTo(map);
+    // ---------- Small helpers ----------
+    const $ = id => document.getElementById(id);
 
-    function colour(pctFree) {
-      if (pctFree > 0.3) return "green";
-      if (pctFree > 0.1) return "orange";
-      return "red";
+    function escapeHtml(text) {
+      return String(text ?? "").replace(/[&<>"']/g, ch =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
     }
 
-    async function loadData() {
+    // Colour level from how FULL a car park is (0 to 1)
+    function level(fullness) {
+      if (fullness < 0.7) return "good";
+      if (fullness < 0.9) return "mid";
+      return "low";
+    }
+
+    function formatDistance(m) {
+      return m < 1000 ? `${Math.round(m / 10) * 10}m` : `${(m / 1000).toFixed(1)}km`;
+    }
+
+    function formatTime(iso) {
+      return new Date(iso).toLocaleString("en-SG", {
+        day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    }
+
+    function titleCase(text) {
+      return String(text ?? "").toLowerCase().replace(/\b\w/g, ch => ch.toUpperCase());
+    }
+
+    // "MULTI-STOREY CAR PARK" -> "Multi-storey"
+    function shortType(type) {
+      const t = titleCase(String(type ?? "").replace(/\s*CAR PARK$/i, ""));
+      return t.replace("Multi-Storey", "Multi-storey") || "HDB";
+    }
+
+    // "SUN & PH FR 7AM-10.30PM" -> "Free Sun & PH, 7am–10.30pm"
+    function freeParkingText(value) {
+      if (!value || value.toUpperCase() === "NO") return "No free parking";
+      return value.replace(/^SUN & PH FR\s*/i, "Free Sun & PH, ")
+                  .replace(/(\d)(AM|PM)/gi, (_, d, ap) => d + ap.toLowerCase())
+                  .replace("-", "–");
+    }
+
+    function isTrusted(cp) { return !cp.is_stale && !cp.is_invalid; }
+
+    // ---------- All car parks on the map, grouped into clusters ----------
+    // Bubble label = % full of the whole group (total used lots / total lots)
+    function clusterIcon(cluster) {
+      const cps = cluster.getAllChildMarkers().map(m => m.options.cp);
+      const trusted = cps.filter(isTrusted);
+      const total = trusted.reduce((s, cp) => s + cp.total_lots, 0);
+      const free  = trusted.reduce((s, cp) => s + cp.lots_available, 0);
+      const full = total > 0 ? 1 - free / total : null;
+      const cls = full === null ? "none" : level(full);
+      const size = cps.length < 10 ? 40 : cps.length < 50 ? 50 : 60;
+      return L.divIcon({
+        html: `<div class="cluster bg-${cls}" style="width:${size}px;height:${size}px">
+                 <span class="c-pct" style="font-size:${size < 50 ? 12 : 14}px">
+                   ${full === null ? "–" : Math.round(full * 100) + "%"}</span>
+                 <span class="c-count">${cps.length} parks</span>
+               </div>`,
+        className: "", iconSize: [size, size],
+      });
+    }
+
+    const clusters = L.markerClusterGroup({
+      iconCreateFunction: clusterIcon,
+      maxClusterRadius: 70,
+      disableClusteringAtZoom: 16,
+      showCoverageOnHover: false,
+      chunkedLoading: true,
+    }).addTo(map);
+
+    const markerById = {};   // car park number -> map marker, so cards can open them
+    let nearbyIds = new Set();
+
+    function markerIcon(cp) {
+      const cls = isTrusted(cp) ? level(1 - cp.lots_available / cp.total_lots) : "none";
+      const extra = nearbyIds.has(cp.carpark_number) ? " nearby" : "";
+      const size = extra ? 18 : 14;
+      return L.divIcon({ html: `<div class="cp-dot bg-${cls}${extra}"></div>`,
+                         className: "", iconSize: [size, size] });
+    }
+
+    function popupHtml(cp) {
+      const note = cp.is_invalid ? "⚠ Data issue: more free lots than total"
+                 : cp.is_stale   ? `⚠ No update since ${formatTime(cp.update_datetime)}`
+                 : `Updated ${formatTime(cp.update_datetime)}`;
+      return `<b>${escapeHtml(titleCase(cp.address))}</b><br>
+              ${cp.lots_available} / ${cp.total_lots} lots free<br>
+              <small style="color:var(--muted)">${note}</small>`;
+    }
+
+    async function loadMap() {
+      const res = await fetch("/api/availability");
+      if (!res.ok) throw new Error("map data");
+      const data = await res.json();
+
+      for (const id in markerById) delete markerById[id];
+      const layers = data.map(cp => {
+        const m = L.marker([cp.lat, cp.lng], { cp, icon: markerIcon(cp) }).bindPopup(popupHtml(cp));
+        markerById[cp.carpark_number] = m;
+        return m;
+      });
+      clusters.clearLayers();
+      clusters.addLayers(layers);
+
+      const trusted = data.filter(isTrusted).length;
+      $("footer").textContent = `${trusted} live car parks · ${data.length - trusted} flagged · ` +
+                                `updated ${new Date().toLocaleTimeString("en-SG")}`;
+    }
+
+    // ---------- Nearby list ----------
+    let origin = null;       // { lat, lng, label }
+    let originMarker = null;
+
+    function setOrigin(lat, lng, label, isDevice) {
+      origin = { lat, lng, label };
+      if (originMarker) originMarker.remove();
+      originMarker = isDevice
+        ? L.marker([lat, lng], { icon: L.divIcon({ html: '<div class="you-dot"></div>',
+                                                   className: "", iconSize: [16, 16] }) })
+        : L.marker([lat, lng]);
+      originMarker.bindTooltip(escapeHtml(label)).addTo(map);
+      $("context").innerHTML = `Nearest to <b>${escapeHtml(label)}</b>`;
+      loadNearby(true);
+    }
+
+    function cardHtml(cp) {
+      const full = 1 - cp.lots_available / cp.total_lots;
+      const cls = level(full);
+      const pct = Math.round(full * 100);
+      const gantry = parseFloat(cp.gantry_height) > 0 ? ` · Gantry ${cp.gantry_height}m` : "";
+      return `
+        <div class="card" tabindex="0" data-id="${escapeHtml(cp.car_park_no)}">
+          <div class="card-top">
+            <div>
+              <div class="card-name">${escapeHtml(titleCase(cp.address))}</div>
+              <div class="card-meta">
+                <span>${formatDistance(cp.distance_m)}</span><span>•</span>
+                <span class="badge">${escapeHtml(shortType(cp.car_park_type))}</span><span>•</span>
+                <span class="pct c-${cls}">${pct}% full</span>
+              </div>
+            </div>
+            <div class="lots">
+              <span class="lots-dot bg-${cls}"></span>
+              <div class="lots-num c-${cls}">${cp.lots_available}</div>
+              <div class="lots-label">LOTS</div>
+            </div>
+          </div>
+          <div class="card-bottom">
+            <span><b>${escapeHtml(freeParkingText(cp.free_parking))}</b>${escapeHtml(gantry)}</span>
+            <span class="chevron">›</span>
+          </div>
+          <div class="bar bg-${cls}" style="width:${pct}%"></div>
+        </div>`;
+    }
+
+    async function loadNearby(fitMap) {
+      if (!origin) return;
       try {
-        const res = await fetch("/api/availability");
-        const data = await res.json();
+        const res = await fetch(`/api/nearby?lat=${origin.lat}&lng=${origin.lng}&limit=${NEARBY_COUNT}`);
+        if (res.status === 422) {
+          $("list").innerHTML = `<div class="message">That location is outside Singapore.
+                                 Try searching an area or postal code instead.</div>`;
+          return;
+        }
+        if (!res.ok) throw new Error("nearby");
+        const cps = await res.json();
 
-        // Heatmap: weight = how full the car park is (0 = empty, 1 = full)
-        heat.setLatLngs(data.map(cp =>
-          [cp.lat, cp.lng, 1 - cp.lots_available / cp.total_lots]));
+        if (cps.length === 0) {
+          $("list").innerHTML = `<div class="message">No car parks with live data nearby.</div>`;
+          return;
+        }
+        $("list").innerHTML = cps.map(cardHtml).join("");
 
-        // Markers: one coloured circle per car park
-        markers.clearLayers();
-        data.forEach(cp => {
-          const pct = cp.lots_available / cp.total_lots;
-          L.circleMarker([cp.lat, cp.lng], {
-            radius: 6, color: colour(pct), fillOpacity: 0.8
-          }).bindPopup(`<b>${cp.address}</b><br>
-                        ${cp.lots_available} / ${cp.total_lots} lots free<br>
-                        <small>Updated ${cp.update_datetime}</small>`)
-            .addTo(markers);
-        });
+        // Highlight these car parks on the map
+        nearbyIds = new Set(cps.map(cp => cp.car_park_no));
+        Object.entries(markerById).forEach(([id, m]) => m.setIcon(markerIcon(m.options.cp)));
 
-        document.getElementById("status").textContent =
-          `${data.length} car parks · refreshed ${new Date().toLocaleTimeString()}`;
+        if (fitMap) {
+          const bounds = L.latLngBounds([[origin.lat, origin.lng], ...cps.map(cp => [cp.lat, cp.lng])]);
+          map.fitBounds(bounds, { padding: [60, 60], maxZoom: 17 });
+        }
       } catch (e) {
-        document.getElementById("status").textContent = "Could not load data";
+        $("list").innerHTML = `<div class="message">Couldn't load nearby car parks. Please try again.</div>`;
       }
     }
 
-    loadData();
-    setInterval(loadData, 60000);  // refresh every minute
+    // Clicking a card shows that car park on the map
+    function openCard(card) {
+      const m = markerById[card.dataset.id];
+      if (m) clusters.zoomToShowLayer(m, () => m.openPopup());
+    }
+    $("list").addEventListener("click", e => {
+      const card = e.target.closest(".card");
+      if (card) openCard(card);
+    });
+    $("list").addEventListener("keydown", e => {
+      const card = e.target.closest(".card");
+      if (card && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openCard(card); }
+    });
+
+    // ---------- Device location ----------
+    function useMyLocation() {
+      if (!navigator.geolocation) {
+        $("context").textContent = "Location isn't available in this browser. Search an area instead.";
+        return;
+      }
+      $("context").textContent = "Finding your location…";
+      navigator.geolocation.getCurrentPosition(
+        pos => setOrigin(pos.coords.latitude, pos.coords.longitude, "your location", true),
+        () => {
+          $("context").textContent = "Location is off. Search an area or postal code instead.";
+          if (!origin) $("list").innerHTML = `<div class="message">Search for a place, like
+            <b>Tampines Mall</b> or a postal code like <b>460101</b>, to see the nearest car parks.</div>`;
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
+    }
+    $("locate").addEventListener("click", useMyLocation);
+
+    // ---------- Search box with suggestions ----------
+    const input = $("search"), box = $("suggestions");
+    let results = [], active = -1, timer = null, latestQuery = "";
+
+    function renderSuggestions() {
+      if (!results.length) {
+        box.innerHTML = `<div class="suggestion empty">No matching places</div>`;
+      } else {
+        box.innerHTML = results.map((r, i) => `
+          <button class="suggestion${i === active ? " active" : ""}" data-i="${i}" role="option">
+            <div class="s-name">${escapeHtml(r.name)}</div>
+            <div class="s-addr">${escapeHtml(r.address)}</div>
+          </button>`).join("");
+      }
+      box.classList.add("open");
+    }
+
+    function choose(i) {
+      const r = results[i];
+      if (!r) return;
+      input.value = r.name;
+      box.classList.remove("open");
+      setOrigin(r.lat, r.lng, r.name, false);
+    }
+
+    input.addEventListener("input", () => {
+      clearTimeout(timer);
+      const q = input.value.trim();
+      if (q.length < 2) { box.classList.remove("open"); return; }
+      timer = setTimeout(async () => {          // wait until typing pauses
+        latestQuery = q;
+        try {
+          const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+          const data = res.ok ? await res.json() : [];
+          if (q !== latestQuery) return;         // a newer search has started
+          results = data; active = -1;
+          renderSuggestions();
+        } catch (e) { /* ignore network hiccups while typing */ }
+      }, 300);
+    });
+
+    input.addEventListener("keydown", e => {
+      if (!box.classList.contains("open")) return;
+      if (e.key === "ArrowDown") { active = Math.min(active + 1, results.length - 1); renderSuggestions(); e.preventDefault(); }
+      if (e.key === "ArrowUp")   { active = Math.max(active - 1, 0); renderSuggestions(); e.preventDefault(); }
+      if (e.key === "Enter")     { choose(active >= 0 ? active : 0); e.preventDefault(); }
+      if (e.key === "Escape")    { box.classList.remove("open"); }
+    });
+
+    box.addEventListener("click", e => {
+      const btn = e.target.closest(".suggestion[data-i]");
+      if (btn) choose(Number(btn.dataset.i));
+    });
+    document.addEventListener("click", e => {
+      if (!e.target.closest(".search")) box.classList.remove("open");
+    });
+
+    // ---------- Start ----------
+    async function refresh() {
+      try { await loadMap(); } catch (e) { $("footer").textContent = "Could not load map data"; }
+      loadNearby(false);
+    }
+    refresh().then(useMyLocation);
+    setInterval(refresh, 60000);   // live data refreshes every minute
   </script>
 </body>
 </html>
