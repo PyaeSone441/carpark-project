@@ -122,6 +122,8 @@
 
     /* ---------- Map ---------- */
     #map { flex: 1; height: 100%; background: var(--bg); }
+    /* Turn the light OpenStreetMap tiles into a dark map */
+    .dark-tiles { filter: invert(1) hue-rotate(180deg) brightness(0.95) contrast(0.9) saturate(0.4); }
     .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--card); color: var(--text); }
     .leaflet-popup-content { font-family: inherit; font-size: 13px; line-height: 1.5; }
     .leaflet-container a.leaflet-popup-close-button { color: var(--muted); }
@@ -199,9 +201,10 @@
     // ---------- Map ----------
     const map = L.map("map", { zoomControl: false }).setView([1.3521, 103.8198], 12);
     L.control.zoom({ position: "topright" }).addTo(map);
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
-      subdomains: "abcd", maxZoom: 20,
+    // Free OpenStreetMap tiles (no API key), darkened with CSS (see .dark-tiles)
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19, className: "dark-tiles",
     }).addTo(map);
 
     // ---------- Small helpers ----------

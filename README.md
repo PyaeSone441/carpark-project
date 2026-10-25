@@ -1,8 +1,8 @@
 # SG Carpark Availability
 
-Live map and heatmap of HDB car park availability in Singapore, built on data.gov.sg open data.
+Live map of HDB car park availability in Singapore, built on data.gov.sg open data.
 
-**Live site:** _add your Render link here_
+**Live site:**(https://carpark-project-bi0v.onrender.com/)
 
 ## Architecture
 
@@ -28,7 +28,7 @@ HDB Carpark Info     ──► load_carparks.py (monthly)            ──►  
 - GitHub Actions schedules can be delayed when GitHub is busy, so data may occasionally be a few minutes older than 5 minutes.
 
 ---
-This project is deployed using supabase and render. you can check out the website at https://carpark-project-bi0v.onrender.com/, do note that 
+This project is deployed using supabase and render. do note that 
 the website will go inactive if there are no users for 15minutes. it will rerun the website if the first user is detected and give it 1 minute for it to show the website.
 
 
